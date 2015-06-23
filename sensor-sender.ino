@@ -1,29 +1,101 @@
 #include <MIDI.h>
-#include<Wire.h>
+#include <Wire.h>
 
-#define NUM 30
+#define NUM 3
 #define MIDI_CHAN 1
-//sensor values
+#define DEBUG 1
 
-uint8_t current_sensor[NUM];
-uint8_t prev_sensor[NUM];
+#define GESTURE_START 0
+#define GESTURE_N 20
+#define FINGER_START 20
+#define FINGER_N 8
+
+#define CONTROL_N 28
+
+//sensor values
+int16_t accel_x, accel_y, accel_z;
+int fingers[FINGER_N];
+int ir; //TODO
+
+int bendPins[8] = {A0, A9, A8, A6, A7, A3, A2, A1};
+int bendThresholds[8] = { 600, 850, 600, 790, 700, 800, 780, 690};
+
+//control values
+uint8_t controls[CONTROL_N];
 
 //accel init
 #define accel_module (0x53)    //ACCELEROMETER SETUP
-byte values [6] ;
+byte values [6];
 char output [512];
 
-int16_t x,y,z;
+
+//Which mode we are in: 1 is gesture, the rest are up to 
+int mode = 1;
 
 void setup() {
   Serial.begin(9600);
-  // put your setup code here, to run once:
-  for(int i = 0; i < NUM; i++){
-    current_sensor[i] = 0;
-    prev_sensor[i] = 0;
-  }
+  // put your setup code here, to run once
+  initFingers();
+  initAccel();
+  Serial.println("Init done");
   
-  Wire.begin();
+}
+
+void loop() {
+  Serial.println("sart loop");
+  // put your main code here, to run repeatedly:
+  //READ
+  readAccel();
+  readFingers();
+  Serial.println("Mode " + (String) mode);
+  if (mode == 1){ // gesture mode
+    // TODO: calibrate accel
+    int xval = map(accel_x, 130, -130, 0, 127);
+    int yval = map(accel_y, 130, -130, 0, 127);
+    
+    int contx = -1;
+    int conty = -1;
+    
+    bool fingerStates[FINGER_N];
+    
+    for (int i = 0; i < FINGER_N; i++){
+      fingerStates[i] = (fingers[i] > bendThresholds[i]);
+      Serial.print(i);
+      Serial.print(fingerStates[i]);
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    // gesture name goes here
+    if (fingerStates[2] && fingerStates[3] && fingerStates[4]){
+      contx = 1;
+    }
+    // ADD NEW GESTURES HERE
+    else if (false) {
+      conty = 2;
+    }
+    
+    if (contx != -1){
+      sendControl(contx, xval);
+    }
+  }
+  delay(100); // TODO: proper timing calibration
+  while (usbMIDI.read()) ; // read and discard any incoming MIDI messages
+}
+
+void sendControl(uint8_t num, uint8_t val) {
+  usbMIDI.sendControlChange(num, val, 1); 
+  #ifdef DEBUG
+  Serial.print("sending ");
+  Serial.print(num);
+  Serial.print(" ");
+  Serial.print(val);
+  Serial.println();
+  #endif
+}
+  
+void initAccel(){
+    Wire.begin();
   Wire.beginTransmission(accel_module);
   Wire.write(0x2D);
   Wire.write(0);
@@ -38,33 +110,9 @@ void setup() {
   Wire.endTransmission();
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-  //READ
-  readAccel();
-  
-  
-  //map accel
-  current_sensor[2] = map(y, -130, 130, 0, 127);
-  
-  //SEND SENSORS
-  for(uint8_t i = 0; i < NUM; i++){
-    if (current_sensor[i] != prev_sensor[i]){
-      usbMIDI.sendControlChange(i, current_sensor[i], MIDI_CHAN);
-      prev_sensor[i] = current_sensor[i];
-      Serial.print("sending ");
-      Serial.print(i);
-      Serial.print(" ");
-      Serial.print(current_sensor[i]);
-      Serial.println();
-    }
-  }
-  delay(100);
-  while (usbMIDI.read()) ; // read and discard any incoming MIDI messages
-}
 
 void readAccel() {
-int16_t xyzregister = 0x32;
+   int16_t xyzregister = 0x32;
 
    Wire.beginTransmission(accel_module);
    Wire.write(xyzregister);
@@ -81,7 +129,18 @@ int16_t xyzregister = 0x32;
    }
    Wire.endTransmission();
    
-   x = (((int16_t)values[1]) << 8) | values [0];
-   y = (((int16_t)values[3]) << 8) | values [2];
-   z = (((int16_t)values[5]) << 8) | values [4];
+   accel_x = (((int16_t)values[1]) << 8) | values [0];
+   accel_y = (((int16_t)values[3]) << 8) | values [2];
+   accel_z = (((int16_t)values[5]) << 8) | values [4];
+}
+
+void initFingers(){
+    for(int i = 0; i< FINGER_N; i++){
+      //pinMode(bendPins[i], INPUT_PULLUP);
+    }
+}
+void readFingers(){
+  for(int i = 0; i< FINGER_N; i++){
+    fingers[i] = analogRead(bendPins[i]);
+  }
 }
